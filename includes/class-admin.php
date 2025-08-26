@@ -190,9 +190,32 @@ class WooToWoo_Admin {
                 var result = $('#sync-result');
                 
                 button.prop('disabled', true).text('Synchronizing...');
-                result.html('<div class="notice notice-info inline"><p>Getting products</p></div>');
                 
                 $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'wootowoo_get_site_url',
+                        nonce: '<?php echo wp_create_nonce('wootowoo_get_site_url'); ?>'
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            result.html('<div class="notice notice-info inline"><p>Getting products from ' + response.data + '...</p></div>');
+                            // Now proceed with actual synchronization
+                            performSync();
+                        } else {
+                            result.html('<div class="notice notice-error inline"><p>Error: ' + response.data + '</p></div>');
+                            button.prop('disabled', false).text('Synchronize');
+                        }
+                    },
+                    error: function() {
+                        result.html('<div class="notice notice-error inline"><p>Failed to get site information</p></div>');
+                        button.prop('disabled', false).text('Synchronize');
+                    }
+                });
+                
+                function performSync() {
+                    $.ajax({
                     url: ajaxurl,
                     type: 'POST',
                     data: {
@@ -212,7 +235,8 @@ class WooToWoo_Admin {
                     complete: function() {
                         button.prop('disabled', false).text('Synchronize');
                     }
-                });
+                    });
+                }
             });
         });
         </script>

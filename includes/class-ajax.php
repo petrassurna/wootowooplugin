@@ -20,6 +20,7 @@ class WooToWoo_Ajax {
         $this->config = WooToWoo_Config::get_instance();
         add_action('wp_ajax_wootowoo_test_connection', array($this, 'test_connection'));
         add_action('wp_ajax_wootowoo_synchronize', array($this, 'synchronize'));
+        add_action('wp_ajax_wootowoo_get_site_url', array($this, 'get_site_url'));
     }
     
     public function test_connection() {
@@ -63,7 +64,8 @@ class WooToWoo_Ajax {
     }
     
     private function perform_synchronization($website_url, $consumer_key, $consumer_secret) {
-        $products_url = rtrim($website_url, '/') . '/wp-json/wc/v3/products';
+        // First, get total count by making a request with per_page=1 to get headers
+        $products_url = rtrim($website_url, '/') . '/wp-json/wc/v3/products?per_page=1';
         
         $response = wp_remote_get($products_url, array(
             'headers' => array(
@@ -82,18 +84,39 @@ class WooToWoo_Ajax {
             return array('success' => false, 'message' => 'API request failed (HTTP ' . $response_code . ')');
         }
         
-        $products = json_decode(wp_remote_retrieve_body($response), true);
+        // Get total count from X-WP-Total header
+        $headers = wp_remote_retrieve_headers($response);
+        $total_products = isset($headers['x-wp-total']) ? intval($headers['x-wp-total']) : 0;
         
-        if (!is_array($products)) {
-            return array('success' => false, 'message' => 'Invalid response from source site');
+        if ($total_products === 0) {
+            // Fallback: try to get from response body if header not available
+            $products = json_decode(wp_remote_retrieve_body($response), true);
+            if (is_array($products)) {
+                // If we only got 1 product but there might be more, we need to estimate
+                $total_products = count($products);
+            } else {
+                return array('success' => false, 'message' => 'Invalid response from source site');
+            }
         }
         
-        $product_count = count($products);
-        
-        // For now, just return success with count - actual sync logic would be implemented here
+        // For now, just return success with total count - actual sync logic would be implemented here
         return array(
             'success' => true, 
-            'message' => "{$product_count} products to read"
+            'message' => "{$total_products} products to read"
         );
+    }
+    
+    public function get_site_url() {
+        if (!wp_verify_nonce($_POST['nonce'], 'wootowoo_get_site_url')) {
+            wp_die('Security check failed');
+        }
+        
+        $website_url = $this->config->get_website_url();
+        
+        if (empty($website_url)) {
+            wp_send_json_error('No website URL configured');
+        }
+        
+        wp_send_json_success($website_url);
     }
 }
