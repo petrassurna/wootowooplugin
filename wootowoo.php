@@ -15,12 +15,17 @@ if (!defined('ABSPATH')) {
 // Define plugin constants
 define('WOOTOWOO_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WOOTOWOO_PLUGIN_URL', plugin_dir_url(__FILE__));
+define('WOOTOWOO_PLUGIN_FILE', __FILE__);
 define('WOOTOWOO_VERSION', '1.0.0');
 
 // Include required files
-require_once WOOTOWOO_PLUGIN_DIR . 'includes/class-config.php';
-require_once WOOTOWOO_PLUGIN_DIR . 'includes/class-admin.php';
-require_once WOOTOWOO_PLUGIN_DIR . 'includes/class-ajax.php';
+require_once WOOTOWOO_PLUGIN_DIR . 'includes/core/class-config.php';
+require_once WOOTOWOO_PLUGIN_DIR . 'includes/core/class-database.php';
+require_once WOOTOWOO_PLUGIN_DIR . 'includes/api/class-api-client.php';
+require_once WOOTOWOO_PLUGIN_DIR . 'includes/services/class-sync-service.php';
+require_once WOOTOWOO_PLUGIN_DIR . 'includes/services/class-product-processor.php';
+require_once WOOTOWOO_PLUGIN_DIR . 'includes/admin/class-admin.php';
+require_once WOOTOWOO_PLUGIN_DIR . 'includes/admin/class-ajax.php';
 
 /**
  * Main plugin class
@@ -49,6 +54,7 @@ class WooToWoo
     {
         // Initialize plugin components
         WooToWoo_Config::get_instance();
+        WooToWoo_Database::get_instance();
         WooToWoo_Admin::get_instance();
         WooToWoo_Ajax::get_instance();
     }
