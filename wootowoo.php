@@ -24,6 +24,7 @@ require_once WOOTOWOO_PLUGIN_DIR . 'includes/core/class-database.php';
 require_once WOOTOWOO_PLUGIN_DIR . 'includes/api/class-api-client.php';
 require_once WOOTOWOO_PLUGIN_DIR . 'includes/services/class-sync-service.php';
 require_once WOOTOWOO_PLUGIN_DIR . 'includes/services/class-product-processor.php';
+require_once WOOTOWOO_PLUGIN_DIR . 'includes/services/class-product-uploader.php';
 require_once WOOTOWOO_PLUGIN_DIR . 'includes/admin/class-admin.php';
 require_once WOOTOWOO_PLUGIN_DIR . 'includes/admin/class-ajax.php';
 

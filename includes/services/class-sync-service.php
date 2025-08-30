@@ -285,11 +285,15 @@ class WooToWoo_Sync_Service {
         // Update stored products with destination category IDs
         $products_updated = $this->update_products_with_destination_categories();
         
+        // Handle the array result from update_products_with_destination_categories
+        $products_updated_count = is_array($products_updated) ? $products_updated['updated_count'] : $products_updated;
+        
         return array(
             'success' => true,
-            'message' => "Categories synced: {$categories_created} created/updated, {$products_updated} products updated",
+            'message' => "Categories synced: {$categories_created} created/updated, {$products_updated_count} products updated",
             'categories_processed' => $categories_created,
-            'products_updated' => $products_updated
+            'products_updated' => $products_updated_count,
+            'update_details' => $products_updated
         );
     }
     
@@ -335,7 +339,8 @@ class WooToWoo_Sync_Service {
                 $categories_with_images = array_merge($categories_with_images, $result['categories']);
                 
                 // Check if we have more pages
-                $has_more = ($page < $result['total_pages']) && (count($result['categories']) === $per_page);
+                $total_pages = isset($result['total_pages']) ? $result['total_pages'] : 999;
+                $has_more = ($page < $total_pages) && (count($result['categories']) === $per_page);
                 $page++;
             } else {
                 error_log("WooToWoo: Page {$page} failed or returned no categories");

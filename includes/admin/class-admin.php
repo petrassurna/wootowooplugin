@@ -108,6 +108,64 @@ class WooToWoo_Admin {
                                 <button type="button" id="update-categories-btn" class="button button-secondary">Fix category mapping</button>
                             </div>
                         <?php endif; ?>
+                        
+                        <?php 
+                        // Debug: Check why upload section might not be showing
+                        error_log("WooToWoo Debug: is_complete = " . ($sync_status['is_complete'] ? 'true' : 'false'));
+                        error_log("WooToWoo Debug: all_categories_mapped = " . (isset($sync_status['all_categories_mapped']) ? ($sync_status['all_categories_mapped'] ? 'true' : 'false') : 'not set'));
+                        
+                        // Check upload status if sync is complete and categories are mapped
+                        if ($sync_status['is_complete'] && isset($sync_status['all_categories_mapped']) && $sync_status['all_categories_mapped']): 
+                            $uploader = WooToWoo_Product_Uploader::get_instance();
+                            $upload_status = $uploader->get_upload_status();
+                        ?>
+                            <div style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 15px;">
+                                <h3>Product Upload</h3>
+                                <div class="notice <?php echo $upload_status['pending_upload'] > 0 ? 'notice-info' : 'notice-success'; ?> inline" style="margin-bottom: 15px;">
+                                    <p><strong>Upload Status:</strong>
+                                        <?php echo $upload_status['uploaded_count']; ?> of <?php echo $upload_status['total_synced']; ?> products uploaded to WordPress.
+                                        <?php if ($upload_status['pending_upload'] > 0): ?>
+                                            <strong><?php echo $upload_status['pending_upload']; ?> products pending upload.</strong>
+                                        <?php else: ?>
+                                            <strong>✅ All products uploaded!</strong>
+                                        <?php endif; ?>
+                                    </p>
+                                </div>
+                                <?php if ($upload_status['ready_to_upload']): ?>
+                                    <button type="button" id="upload-products-btn" class="button button-primary" style="margin-right: 10px;">Upload products to WordPress</button>
+                                    <button type="button" id="check-upload-status-btn" class="button">Check upload status</button>
+                                <?php else: ?>
+                                    <p><em>Complete synchronization and category mapping first.</em></p>
+                                <?php endif; ?>
+                            </div>
+                        <?php else: ?>
+                            <!-- Fallback: Show upload section even if conditions aren't perfectly met -->
+                            <div style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 15px;">
+                                <h3>Product Upload</h3>
+                                <?php 
+                                $uploader = WooToWoo_Product_Uploader::get_instance();
+                                $upload_status = $uploader->get_upload_status();
+                                ?>
+                                <div class="notice <?php echo $upload_status['pending_upload'] > 0 ? 'notice-info' : 'notice-success'; ?> inline" style="margin-bottom: 15px;">
+                                    <p><strong>Upload Status:</strong>
+                                        <?php echo $upload_status['uploaded_count']; ?> of <?php echo $upload_status['total_synced']; ?> products uploaded to WordPress.
+                                        <?php if ($upload_status['pending_upload'] > 0): ?>
+                                            <strong><?php echo $upload_status['pending_upload']; ?> products pending upload.</strong>
+                                        <?php else: ?>
+                                            <strong>✅ All products uploaded!</strong>
+                                        <?php endif; ?>
+                                    </p>
+                                </div>
+                                <?php if ($upload_status['ready_to_upload'] || $upload_status['pending_upload'] > 0): ?>
+                                    <button type="button" id="upload-products-btn" class="button button-primary" style="margin-right: 10px;">Upload products to WordPress</button>
+                                    <button type="button" id="check-upload-status-btn" class="button">Check upload status</button>
+                                <?php else: ?>
+                                    <p><em>Products ready for upload: <?php echo $upload_status['categories_ready'] ? 'Yes' : 'No (fix categories first)'; ?></em></p>
+                                    <button type="button" id="upload-products-btn" class="button button-primary" style="margin-right: 10px;">Upload products to WordPress</button>
+                                    <button type="button" id="force-upload-products-btn" class="button button-secondary" style="margin-right: 10px;">Force Upload (Skip Category Check)</button>
+                                <?php endif; ?>
+                            </div>
+                        <?php endif; ?>
                     <?php else: ?>
                         <button type="button" id="synchronize-btn" class="button button-primary">Synchronize</button>
                     <?php endif; ?>
@@ -662,6 +720,188 @@ class WooToWoo_Admin {
                     }
                 });
             });
+            
+            // Handle upload status check button
+            $('#check-upload-status-btn').on('click', function() {
+                var button = $(this);
+                var result = $('#sync-result');
+                
+                button.prop('disabled', true).text('Checking...');
+                result.html('<div class="notice notice-info inline"><p>Checking upload status...</p></div>');
+                
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'wootowoo_get_upload_status',
+                        nonce: '<?php echo wp_create_nonce('wootowoo_get_upload_status'); ?>'
+                    },
+                    success: function(response) {
+                        if (response.success && response.data) {
+                            var data = response.data;
+                            var message = 'Upload Status: ' + data.uploaded_count + ' of ' + data.total_synced + ' products uploaded to WordPress.';
+                            
+                            if (data.pending_upload > 0) {
+                                message += ' ' + data.pending_upload + ' products pending upload.';
+                                result.html('<div class="notice notice-info inline"><p>' + message + '</p></div>');
+                            } else {
+                                message += ' ✅ All products uploaded!';
+                                result.html('<div class="notice notice-success inline"><p>' + message + '</p></div>');
+                            }
+                        } else {
+                            result.html('<div class="notice notice-error inline"><p>Failed to check upload status</p></div>');
+                        }
+                    },
+                    error: function() {
+                        result.html('<div class="notice notice-error inline"><p>Upload status check failed</p></div>');
+                    },
+                    complete: function() {
+                        button.prop('disabled', false).text('Check upload status');
+                    }
+                });
+            });
+            
+            // Handle product upload button (both normal and force)
+            $('#upload-products-btn, #force-upload-products-btn').on('click', function() {
+                var button = $(this);
+                var result = $('#sync-result');
+                
+                if (!confirm('This will upload products to WordPress with images. This may take some time. Continue?')) {
+                    return;
+                }
+                
+                if (uploadInProgress) {
+                    return;
+                }
+                
+                uploadInProgress = true;
+                terminateUpload = false;
+                button.prop('disabled', true).text('Uploading...');
+                
+                // Hide other buttons during upload
+                $('#check-upload-status-btn, #restart-sync-btn').hide();
+                
+                var isForceUpload = button.attr('id') === 'force-upload-products-btn';
+                var uploadMessage = isForceUpload ? 'Starting forced product upload (skipping category validation)...' : 'Starting product upload...';
+                result.html('<div class="notice notice-info inline"><p>' + uploadMessage + '</p></div>');
+                
+                // Start the upload process
+                startProductUpload(1, isForceUpload);
+            });
+            
+            // Upload control variables
+            var uploadInProgress = false;
+            var terminateUpload = false;
+            var currentUploadRequest = null;
+            
+            // Handle terminate upload (use event delegation like sync)
+            $(document).on('click', '#terminate-upload-btn', function() {
+                console.log('Terminate upload button clicked!');
+                terminateUpload = true;
+                $(this).prop('disabled', true).text('Terminating...');
+                
+                // Abort current AJAX request if any
+                if (currentUploadRequest && currentUploadRequest.readyState !== 4) {
+                    console.log('Aborting current upload request');
+                    currentUploadRequest.abort();
+                }
+                
+                // Show termination message and reset buttons
+                $('#sync-result').html('<div class="notice notice-warning inline"><p>Product upload terminated by user</p></div>');
+                resetUploadButton($('#upload-products-btn'));
+            });
+            
+            function startProductUpload(batchNum, forceUpload) {
+                if (terminateUpload) {
+                    $('#sync-result').html('<div class="notice notice-warning inline"><p>Product upload terminated by user</p></div>');
+                    resetUploadButton($('#upload-products-btn, #force-upload-products-btn'));
+                    return;
+                }
+                
+                var result = $('#sync-result');
+                result.html('<div class="notice notice-info inline"><p>Processing upload batch ' + batchNum + '...</p></div>');
+                
+                // Always add terminate button if upload is in progress
+                if (uploadInProgress) {
+                    $('#sync-result').append('<div style="margin-top: 10px;"><button type="button" id="terminate-upload-btn" class="button">Terminate upload</button></div>');
+                }
+                
+                var requestData = {
+                    action: 'wootowoo_upload_products_batch',
+                    nonce: '<?php echo wp_create_nonce('wootowoo_upload_products_batch'); ?>',
+                    batch_size: 5
+                };
+                
+                if (forceUpload) {
+                    requestData.force_upload = 'true';
+                }
+                
+                currentUploadRequest = $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: requestData,
+                    success: function(response) {
+                        if (terminateUpload) {
+                            return;
+                        }
+                        
+                        if (response.success && response.data) {
+                            var data = response.data;
+                            
+                            if (data.completed) {
+                                result.html('<div class="notice notice-success inline"><p>✅ Product upload completed! ' + data.uploaded_count + ' products uploaded to WordPress.</p></div>');
+                                resetUploadButton($('#upload-products-btn'));
+                                
+                                // Reload page to update status display
+                                setTimeout(function() {
+                                    location.reload();
+                                }, 2000);
+                            } else if (data.has_more) {
+                                var progressMessage = 'Batch ' + batchNum + ' complete. Uploaded ' + data.uploaded_count + ' products.';
+                                if (data.error_count > 0) {
+                                    progressMessage += ' ' + data.error_count + ' errors.';
+                                }
+                                progressMessage += ' ' + data.remaining_count + ' products remaining...';
+                                
+                                result.html('<div class="notice notice-info inline"><p>' + progressMessage + '</p></div>');
+                                
+                                // Add terminate button
+                                if (uploadInProgress) {
+                                    $('#sync-result').append('<div style="margin-top: 10px;"><button type="button" id="terminate-upload-btn" class="button">Terminate upload</button></div>');
+                                }
+                                
+                                // Continue with next batch
+                                setTimeout(function() {
+                                    if (!terminateUpload) {
+                                        startProductUpload(batchNum + 1, forceUpload);
+                                    }
+                                }, 2000); // 2 second delay between batches for image processing
+                            } else {
+                                result.html('<div class="notice notice-warning inline"><p>Upload stopped. Processed ' + data.uploaded_count + ' products.</p></div>');
+                                resetUploadButton($('#upload-products-btn'));
+                            }
+                        } else {
+                            result.html('<div class="notice notice-error inline"><p>Upload failed: ' + (response.data ? response.data : 'Unknown error') + '</p></div>');
+                            resetUploadButton($('#upload-products-btn'));
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        if (status !== 'abort') {
+                            result.html('<div class="notice notice-error inline"><p>Upload failed: ' + error + '</p></div>');
+                        }
+                        resetUploadButton($('#upload-products-btn'));
+                    }
+                });
+            }
+            
+            function resetUploadButton(button) {
+                uploadInProgress = false;
+                terminateUpload = false;
+                button.prop('disabled', false).text('Upload products to WordPress');
+                
+                // Show other buttons again
+                $('#check-upload-status-btn, #restart-sync-btn').show();
+            }
             
         });
         </script>

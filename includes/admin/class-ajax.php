@@ -9,6 +9,7 @@ class WooToWoo_Ajax {
     private $config;
     private $sync_service;
     private $api_client;
+    private $uploader;
     
     public static function get_instance() {
         if (null === self::$instance) {
@@ -21,6 +22,7 @@ class WooToWoo_Ajax {
         $this->config = WooToWoo_Config::get_instance();
         $this->sync_service = WooToWoo_Sync_Service::get_instance();
         $this->api_client = WooToWoo_API_Client::get_instance();
+        $this->uploader = WooToWoo_Product_Uploader::get_instance();
         
         add_action('wp_ajax_wootowoo_test_connection', array($this, 'test_connection'));
         add_action('wp_ajax_wootowoo_synchronize', array($this, 'synchronize'));
@@ -33,6 +35,8 @@ class WooToWoo_Ajax {
         add_action('wp_ajax_wootowoo_sync_categories', array($this, 'sync_categories'));
         add_action('wp_ajax_wootowoo_validate_category_mapping', array($this, 'validate_category_mapping'));
         add_action('wp_ajax_wootowoo_force_update_categories', array($this, 'force_update_categories'));
+        add_action('wp_ajax_wootowoo_get_upload_status', array($this, 'get_upload_status'));
+        add_action('wp_ajax_wootowoo_upload_products_batch', array($this, 'upload_products_batch'));
     }
 
     public function test_connection() {
@@ -186,6 +190,33 @@ class WooToWoo_Ajax {
         }
         
         $result = $this->sync_service->force_update_product_categories();
+        
+        if ($result['success']) {
+            wp_send_json_success($result);
+        } else {
+            wp_send_json_error($result['message']);
+        }
+    }
+    
+    public function get_upload_status() {
+        if (!wp_verify_nonce($_POST['nonce'], 'wootowoo_get_upload_status')) {
+            wp_die('Security check failed');
+        }
+        
+        $result = $this->uploader->get_upload_status();
+        
+        wp_send_json_success($result);
+    }
+    
+    public function upload_products_batch() {
+        if (!wp_verify_nonce($_POST['nonce'], 'wootowoo_upload_products_batch')) {
+            wp_die('Security check failed');
+        }
+        
+        $batch_size = isset($_POST['batch_size']) ? intval($_POST['batch_size']) : 5;
+        $force_upload = isset($_POST['force_upload']) && $_POST['force_upload'] === 'true';
+        
+        $result = $this->uploader->upload_products_batch($batch_size, $force_upload);
         
         if ($result['success']) {
             wp_send_json_success($result);
