@@ -85,7 +85,13 @@ class WooToWoo_Admin {
                             <p><strong>Status:</strong> 
                                 <?php echo $sync_status['products']; ?> products imported. 
                                 <?php echo $sync_status['variable_products']; ?> variable products found, <?php echo $sync_status['completed_variations']; ?> with variations synced.
-                                <?php echo $sync_status['categories_mapped']; ?> categories synced.
+                                <?php echo $sync_status['categories_mapped']; ?> of <?php echo $sync_status['categories']; ?> categories synced.
+                                <?php if (isset($sync_status['unmapped_categories']) && $sync_status['unmapped_categories'] > 0): ?>
+                                    <span style="color: #d63638;"><strong><?php echo $sync_status['unmapped_categories']; ?> categories unmapped.</strong></span>
+                                <?php endif; ?>
+                                <?php if (isset($sync_status['products_with_unmapped_categories']) && $sync_status['products_with_unmapped_categories'] > 0): ?>
+                                    <span style="color: #d63638;"><strong><?php echo $sync_status['products_with_unmapped_categories']; ?> products have unmapped categories.</strong></span>
+                                <?php endif; ?>
                                 <?php if ($sync_status['is_complete']): ?>
                                     <strong>✅ Synchronization complete!</strong>
                                 <?php endif; ?>
@@ -95,6 +101,13 @@ class WooToWoo_Admin {
                             <button type="button" id="resume-sync-btn" class="button button-primary" style="margin-right: 10px;">Resume synchronization</button>
                         <?php endif; ?>
                         <button type="button" id="restart-sync-btn" class="button button-secondary" style="margin-right: 10px;">Clear and restart</button>
+                        
+                        <?php if (isset($sync_status['unmapped_categories']) && $sync_status['unmapped_categories'] > 0): ?>
+                            <div style="margin-top: 10px;">
+                                <button type="button" id="validate-categories-btn" class="button" style="margin-right: 10px;">Check category mapping</button>
+                                <button type="button" id="update-categories-btn" class="button button-secondary">Fix category mapping</button>
+                            </div>
+                        <?php endif; ?>
                     <?php else: ?>
                         <button type="button" id="synchronize-btn" class="button button-primary">Synchronize</button>
                     <?php endif; ?>
@@ -560,6 +573,95 @@ class WooToWoo_Admin {
                     }
                 });
             }
+            
+            // Handle category validation button
+            $('#validate-categories-btn').on('click', function() {
+                var button = $(this);
+                var result = $('#sync-result');
+                
+                button.prop('disabled', true).text('Checking...');
+                result.html('<div class="notice notice-info inline"><p>Validating category mapping...</p></div>');
+                
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'wootowoo_validate_category_mapping',
+                        nonce: '<?php echo wp_create_nonce('wootowoo_validate_category_mapping'); ?>'
+                    },
+                    success: function(response) {
+                        if (response.success && response.data) {
+                            var data = response.data;
+                            var message = '';
+                            
+                            if (data.is_ready) {
+                                message = '✅ All categories are properly mapped and ready for product upload.';
+                                result.html('<div class="notice notice-success inline"><p>' + message + '</p></div>');
+                            } else {
+                                message = '⚠️ Category mapping issues found:<br>';
+                                if (data.missing_categories.length > 0) {
+                                    message += '• ' + data.missing_categories.length + ' categories missing from sync table<br>';
+                                }
+                                if (data.unmapped_categories > 0) {
+                                    message += '• ' + data.unmapped_categories + ' categories without destination IDs<br>';
+                                }
+                                if (data.products_with_unmapped_categories > 0) {
+                                    message += '• ' + data.products_with_unmapped_categories + ' products have unmapped categories<br>';
+                                }
+                                message += 'Click "Fix category mapping" to resolve these issues.';
+                                result.html('<div class="notice notice-warning inline"><p>' + message + '</p></div>');
+                            }
+                        } else {
+                            result.html('<div class="notice notice-error inline"><p>Failed to validate category mapping</p></div>');
+                        }
+                    },
+                    error: function() {
+                        result.html('<div class="notice notice-error inline"><p>Category validation failed</p></div>');
+                    },
+                    complete: function() {
+                        button.prop('disabled', false).text('Check category mapping');
+                    }
+                });
+            });
+            
+            // Handle category update button
+            $('#update-categories-btn').on('click', function() {
+                var button = $(this);
+                var result = $('#sync-result');
+                
+                if (!confirm('This will sync any missing categories and update all products with correct category IDs. Continue?')) {
+                    return;
+                }
+                
+                button.prop('disabled', true).text('Fixing...');
+                result.html('<div class="notice notice-info inline"><p>Updating category mappings...</p></div>');
+                
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'wootowoo_force_update_categories',
+                        nonce: '<?php echo wp_create_nonce('wootowoo_force_update_categories'); ?>'
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            result.html('<div class="notice notice-success inline"><p>' + response.data.message + '</p></div>');
+                            // Reload page to update status display
+                            setTimeout(function() {
+                                location.reload();
+                            }, 2000);
+                        } else {
+                            result.html('<div class="notice notice-error inline"><p>Error: ' + response.data + '</p></div>');
+                        }
+                    },
+                    error: function() {
+                        result.html('<div class="notice notice-error inline"><p>Category update failed</p></div>');
+                    },
+                    complete: function() {
+                        button.prop('disabled', false).text('Fix category mapping');
+                    }
+                });
+            });
             
         });
         </script>

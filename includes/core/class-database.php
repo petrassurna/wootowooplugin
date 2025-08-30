@@ -369,6 +369,8 @@ class WooToWoo_Database {
         $completed_variations = $this->get_completed_variable_products_count();
         $category_count = $this->get_categories_count();
         $categories_mapped = count($this->get_category_mapping());
+        $unmapped_categories = $this->get_unmapped_categories_count();
+        $products_with_unmapped_categories = $this->get_products_with_unmapped_categories_count();
         
         return array(
             'products' => $product_count,
@@ -376,7 +378,88 @@ class WooToWoo_Database {
             'completed_variations' => $completed_variations,
             'categories' => $category_count,
             'categories_mapped' => $categories_mapped,
+            'unmapped_categories' => $unmapped_categories,
+            'products_with_unmapped_categories' => $products_with_unmapped_categories,
+            'all_categories_mapped' => $this->are_all_product_categories_mapped(),
             'is_complete' => $this->is_sync_complete()
         );
+    }
+    
+    public function get_unmapped_categories_count() {
+        global $wpdb;
+        
+        $table_name = $wpdb->prefix . 'wootowoo_categories';
+        
+        return (int) $wpdb->get_var("SELECT COUNT(*) FROM $table_name WHERE destination_category_id IS NULL");
+    }
+    
+    public function get_products_with_unmapped_categories_count() {
+        global $wpdb;
+        
+        $products_table = $wpdb->prefix . 'wootowoo_products';
+        $categories_table = $wpdb->prefix . 'wootowoo_categories';
+        
+        $sql = "SELECT COUNT(DISTINCT p.id) 
+                FROM $products_table p
+                WHERE JSON_EXTRACT(p.product_data, '$.categories') IS NOT NULL 
+                AND JSON_LENGTH(JSON_EXTRACT(p.product_data, '$.categories')) > 0
+                AND EXISTS (
+                    SELECT 1 FROM JSON_TABLE(
+                        JSON_EXTRACT(p.product_data, '$.categories'),
+                        '$[*]' COLUMNS (category_id INT PATH '$.id')
+                    ) jt
+                    LEFT JOIN $categories_table c ON c.source_category_id = jt.category_id
+                    WHERE c.destination_category_id IS NULL
+                )";
+        
+        return (int) $wpdb->get_var($sql);
+    }
+    
+    public function are_all_product_categories_mapped() {
+        return $this->get_products_with_unmapped_categories_count() === 0;
+    }
+    
+    public function get_category_ids_used_in_products() {
+        global $wpdb;
+        
+        $products_table = $wpdb->prefix . 'wootowoo_products';
+        
+        $sql = "SELECT DISTINCT jt.category_id as category_id
+                FROM $products_table p
+                CROSS JOIN JSON_TABLE(
+                    COALESCE(JSON_EXTRACT(p.product_data, '$.categories'), '[]'),
+                    '$[*]' COLUMNS (category_id INT PATH '$.id')
+                ) jt
+                WHERE jt.category_id IS NOT NULL";
+        
+        $results = $wpdb->get_results($sql, ARRAY_A);
+        
+        return array_column($results, 'category_id');
+    }
+    
+    public function ensure_all_product_categories_exist() {
+        $category_ids_in_products = $this->get_category_ids_used_in_products();
+        $missing_categories = array();
+        
+        foreach ($category_ids_in_products as $category_id) {
+            if (!$this->category_exists_in_sync_table($category_id)) {
+                $missing_categories[] = $category_id;
+            }
+        }
+        
+        return $missing_categories;
+    }
+    
+    private function category_exists_in_sync_table($source_category_id) {
+        global $wpdb;
+        
+        $table_name = $wpdb->prefix . 'wootowoo_categories';
+        
+        $count = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $table_name WHERE source_category_id = %d",
+            $source_category_id
+        ));
+        
+        return $count > 0;
     }
 }

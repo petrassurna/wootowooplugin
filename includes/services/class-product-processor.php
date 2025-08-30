@@ -141,6 +141,93 @@ class WooToWoo_Product_Processor {
         return $product;
     }
     
+    public function remap_product_categories_detailed($product, $category_mapping = null) {
+        // Enhanced version that provides detailed feedback about remapping
+        if (!isset($product['categories']) || !is_array($product['categories'])) {
+            return array(
+                'product' => $product,
+                'mapped_count' => 0,
+                'unmapped_count' => 0,
+                'total_categories' => 0,
+                'unmapped_ids' => array()
+            );
+        }
+        
+        // Get category mapping if not provided
+        if ($category_mapping === null) {
+            $sync_service = WooToWoo_Sync_Service::get_instance();
+            $category_mapping = $sync_service->get_category_mapping_for_products();
+        }
+        
+        $remapped_categories = array();
+        $mapped_count = 0;
+        $unmapped_count = 0;
+        $unmapped_ids = array();
+        $total_categories = count($product['categories']);
+        
+        foreach ($product['categories'] as $category) {
+            if (isset($category['id'])) {
+                if (isset($category_mapping[$category['id']])) {
+                    // Update with destination ID
+                    $original_id = $category['id'];
+                    $category['id'] = $category_mapping[$category['id']]->destination_category_id;
+                    $remapped_categories[] = $category;
+                    $mapped_count++;
+                    error_log("WooToWoo: Remapped category {$original_id} to {$category['id']}");
+                } else {
+                    // Keep original if no mapping found
+                    $remapped_categories[] = $category;
+                    $unmapped_count++;
+                    $unmapped_ids[] = $category['id'];
+                    error_log("WooToWoo: No destination mapping found for source category ID {$category['id']}");
+                }
+            } else {
+                // Category without ID, keep as is
+                $remapped_categories[] = $category;
+            }
+        }
+        
+        $product['categories'] = $remapped_categories;
+        
+        return array(
+            'product' => $product,
+            'mapped_count' => $mapped_count,
+            'unmapped_count' => $unmapped_count,
+            'total_categories' => $total_categories,
+            'unmapped_ids' => $unmapped_ids
+        );
+    }
+    
+    public function validate_product_categories_mapped($product, $category_mapping = null) {
+        // Check if all categories in a product have been mapped
+        if (!isset($product['categories']) || !is_array($product['categories'])) {
+            return array(
+                'all_mapped' => true,
+                'unmapped_categories' => array(),
+                'total_categories' => 0
+            );
+        }
+        
+        if ($category_mapping === null) {
+            $sync_service = WooToWoo_Sync_Service::get_instance();
+            $category_mapping = $sync_service->get_category_mapping_for_products();
+        }
+        
+        $unmapped_categories = array();
+        
+        foreach ($product['categories'] as $category) {
+            if (isset($category['id']) && !isset($category_mapping[$category['id']])) {
+                $unmapped_categories[] = $category['id'];
+            }
+        }
+        
+        return array(
+            'all_mapped' => empty($unmapped_categories),
+            'unmapped_categories' => $unmapped_categories,
+            'total_categories' => count($product['categories'])
+        );
+    }
+    
     public function prepare_for_import($product, $category_mapping = null) {
         // Remap categories before preparing for import
         $product = $this->remap_product_categories($product, $category_mapping);

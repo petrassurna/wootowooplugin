@@ -31,6 +31,8 @@ class WooToWoo_Ajax {
         add_action('wp_ajax_wootowoo_get_variation_status', array($this, 'get_variation_status'));
         add_action('wp_ajax_wootowoo_sync_variations_batch', array($this, 'sync_variations_batch'));
         add_action('wp_ajax_wootowoo_sync_categories', array($this, 'sync_categories'));
+        add_action('wp_ajax_wootowoo_validate_category_mapping', array($this, 'validate_category_mapping'));
+        add_action('wp_ajax_wootowoo_force_update_categories', array($this, 'force_update_categories'));
     }
 
     public function test_connection() {
@@ -160,6 +162,30 @@ class WooToWoo_Ajax {
         }
         
         $result = $this->sync_service->sync_categories_from_products();
+        
+        if ($result['success']) {
+            wp_send_json_success($result);
+        } else {
+            wp_send_json_error($result['message']);
+        }
+    }
+    
+    public function validate_category_mapping() {
+        if (!wp_verify_nonce($_POST['nonce'], 'wootowoo_validate_category_mapping')) {
+            wp_die('Security check failed');
+        }
+        
+        $result = $this->sync_service->validate_category_mapping_readiness();
+        
+        wp_send_json_success($result);
+    }
+    
+    public function force_update_categories() {
+        if (!wp_verify_nonce($_POST['nonce'], 'wootowoo_force_update_categories')) {
+            wp_die('Security check failed');
+        }
+        
+        $result = $this->sync_service->force_update_product_categories();
         
         if ($result['success']) {
             wp_send_json_success($result);

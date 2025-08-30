@@ -468,12 +468,27 @@ class WooToWoo_Sync_Service {
         
         $products = $wpdb->get_results("SELECT id, source_product_id, product_data FROM $products_table", ARRAY_A);
         $updated_count = 0;
+        $unmapped_count = 0;
+        $error_count = 0;
         
         foreach ($products as $product_row) {
             $product_data = json_decode($product_row['product_data'], true);
             
+            if (!$product_data) {
+                error_log("WooToWoo: Invalid product data for product ID {$product_row['source_product_id']}");
+                $error_count++;
+                continue;
+            }
+            
             // Remap category IDs
-            $updated_product = $processor->remap_product_categories($product_data, $category_mapping);
+            $remap_result = $processor->remap_product_categories_detailed($product_data, $category_mapping);
+            $updated_product = $remap_result['product'];
+            
+            // Track unmapped categories
+            if ($remap_result['unmapped_count'] > 0) {
+                $unmapped_count += $remap_result['unmapped_count'];
+                error_log("WooToWoo: Product {$product_row['source_product_id']} has {$remap_result['unmapped_count']} unmapped categories");
+            }
             
             // Check if any categories were actually remapped
             if (json_encode($updated_product) !== json_encode($product_data)) {
@@ -491,11 +506,57 @@ class WooToWoo_Sync_Service {
                 
                 if ($result !== false) {
                     $updated_count++;
+                    error_log("WooToWoo: Updated product {$product_row['source_product_id']} with remapped category IDs");
+                } else {
+                    error_log("WooToWoo: Failed to update product {$product_row['source_product_id']}: " . $wpdb->last_error);
+                    $error_count++;
                 }
             }
         }
         
-        return $updated_count;
+        error_log("WooToWoo: Category remapping complete - {$updated_count} products updated, {$unmapped_count} unmapped categories found, {$error_count} errors");
+        
+        return array(
+            'updated_count' => $updated_count,
+            'unmapped_count' => $unmapped_count,
+            'error_count' => $error_count,
+            'total_processed' => count($products)
+        );
+    }
+    
+    public function validate_category_mapping_readiness() {
+        // Check if all categories used by products have been synced and mapped
+        $missing_categories = $this->database->ensure_all_product_categories_exist();
+        $unmapped_categories = $this->database->get_unmapped_categories_count();
+        $products_with_unmapped_categories = $this->database->get_products_with_unmapped_categories_count();
+        
+        return array(
+            'is_ready' => empty($missing_categories) && $unmapped_categories === 0,
+            'missing_categories' => $missing_categories,
+            'unmapped_categories' => $unmapped_categories,
+            'products_with_unmapped_categories' => $products_with_unmapped_categories,
+            'all_categories_mapped' => $this->database->are_all_product_categories_mapped()
+        );
+    }
+    
+    public function force_update_product_categories() {
+        // First ensure all categories from products are synced
+        $this->sync_categories_from_products();
+        
+        // Then update all products with destination category IDs
+        $result = $this->update_products_with_destination_categories();
+        
+        // Validate the update was successful
+        $validation = $this->validate_category_mapping_readiness();
+        
+        return array(
+            'success' => $validation['is_ready'],
+            'update_results' => $result,
+            'validation' => $validation,
+            'message' => $validation['is_ready'] ? 
+                "All product categories successfully updated. {$result['updated_count']} products updated." :
+                "Category mapping incomplete. {$validation['unmapped_categories']} categories still unmapped."
+        );
     }
     
     private function process_category_image($term_id, $category_data) {
