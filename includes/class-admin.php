@@ -79,22 +79,13 @@ class WooToWoo_Admin {
                     <?php if ($has_products): ?>
                         <?php 
                         $database = WooToWoo_Database::get_instance();
-                        $sync_status = $database->get_sync_status();
+                        $product_count = $database->get_products_count();
                         ?>
-                        <div class="notice <?php echo $sync_status['is_complete'] ? 'notice-success' : 'notice-info'; ?> inline" style="margin-bottom: 15px;">
-                            <p><strong>Status:</strong> 
-                                <?php echo $sync_status['products']; ?> products imported. 
-                                <?php echo $sync_status['variable_products']; ?> variable products found, <?php echo $sync_status['completed_variations']; ?> with variations synced.
-                                <?php echo $sync_status['categories_mapped']; ?> categories synced.
-                                <?php if ($sync_status['is_complete']): ?>
-                                    <strong>✅ Synchronization complete!</strong>
-                                <?php endif; ?>
-                            </p>
+                        <div class="notice notice-info inline" style="margin-bottom: 15px;">
+                            <p><strong>Status:</strong> <?php echo $product_count; ?> products already imported. You can resume or restart synchronization.</p>
                         </div>
-                        <?php if (!$sync_status['is_complete']): ?>
-                            <button type="button" id="resume-sync-btn" class="button button-primary" style="margin-right: 10px;">Resume synchronization</button>
-                        <?php endif; ?>
-                        <button type="button" id="restart-sync-btn" class="button button-secondary" style="margin-right: 10px;">Clear and restart</button>
+                        <button type="button" id="resume-sync-btn" class="button button-primary" style="margin-right: 10px;">Resume synchronization</button>
+                        <button type="button" id="restart-sync-btn" class="button button-secondary">Clear and restart</button>
                     <?php else: ?>
                         <button type="button" id="synchronize-btn" class="button button-primary">Synchronize</button>
                     <?php endif; ?>
@@ -216,16 +207,6 @@ class WooToWoo_Admin {
             var terminateSync = false;
             var currentSyncRequest = null;
             
-            // Helper function to update sync result while preserving terminate button
-            function updateSyncResult(html) {
-                $('#sync-result').html(html);
-                
-                // Always add terminate button if sync is in progress
-                if (syncInProgress) {
-                    $('#sync-result').append('<div style="margin-top: 10px;"><button type="button" id="terminate-sync-btn" class="button">Terminate synchronization</button></div>');
-                }
-            }
-            
             // Use event delegation for terminate button (works even if button is recreated)
             $(document).on('click', '#terminate-sync-btn', function() {
                 console.log('Terminate button clicked!');
@@ -279,10 +260,10 @@ class WooToWoo_Admin {
                     },
                     success: function(response) {
                         if (response.success) {
-                            updateSyncResult('<div class="notice notice-info inline"><p>Getting products from ' + response.data + '...</p></div>');
+                            result.html('<div class="notice notice-info inline"><p>Getting products from ' + response.data + '...</p></div>');
                             performInitialSync();
                         } else {
-                            updateSyncResult('<div class="notice notice-error inline"><p>Error: ' + response.data + '</p></div>');
+                            result.html('<div class="notice notice-error inline"><p>Error: ' + response.data + '</p></div>');
                             resetSyncButton(button);
                         }
                     },
@@ -297,6 +278,7 @@ class WooToWoo_Admin {
                 syncInProgress = false;
                 var originalText = button.attr('id') === 'resume-sync-btn' ? 'Resume synchronization' : 'Synchronize';
                 button.prop('disabled', false).text(originalText);
+                $('#terminate-sync-btn').remove();
                 
                 // Show restart button again if it exists
                 $('#restart-sync-btn').show();
@@ -355,17 +337,17 @@ class WooToWoo_Admin {
                     success: function(response) {
                         if (response.success) {
                             var message = response.data.message || response.data;
-                            updateSyncResult('<div class="notice notice-info inline"><p>' + message + '</p></div>');
+                            $('#sync-result').html('<div class="notice notice-info inline"><p>' + message + '</p></div>');
                             
                             // Start paginated sync
                             performPaginatedSync(1, response.data.total_products || 0);
                         } else {
-                            updateSyncResult('<div class="notice notice-error inline"><p>' + response.data + '</p></div>');
+                            $('#sync-result').html('<div class="notice notice-error inline"><p>' + response.data + '</p></div>');
                             resetSyncButton($('#synchronize-btn'));
                         }
                     },
                     error: function() {
-                        updateSyncResult('<div class="notice notice-error inline"><p>222 Synchronization failed - please try again</p></div>');
+                        $('#sync-result').html('<div class="notice notice-error inline"><p>111 Synchronization failed - please try again</p></div>');
                         resetSyncButton($('#synchronize-btn'));
                     }
                 });
@@ -398,7 +380,16 @@ class WooToWoo_Admin {
                             var progressMessage = 'Getting page ' + data.page + ' of ' + data.total_pages + ' pages';
                             
                             // Update the message
-                            updateSyncResult('<div class="notice notice-info inline"><p>' + progressMessage + '</p></div>');
+                            $('#sync-result').html('<div class="notice notice-info inline"><p>' + progressMessage + '</p></div>');
+                            
+                            // Add terminate button on first page processed (regardless of resume point)
+                            if ($('#terminate-sync-btn').length === 0) {
+                                $('#sync-result').append('<div style="margin-top: 10px;"><button type="button" id="terminate-sync-btn" class="button">Terminate synchronization</button></div>');
+                            } else {
+                                // Preserve existing terminate button
+                                var terminateButton = $('#terminate-sync-btn').parent();
+                                $('#sync-result').append(terminateButton);
+                            }
                             
                             if (data.has_more && !terminateSync) {
                                 // Continue with next page
@@ -412,155 +403,23 @@ class WooToWoo_Admin {
                                     }
                                 }, 500); // Small delay to prevent overwhelming the server
                             } else {
-                                // Sync complete - now automatically sync variations
-                                setTimeout(function() {
-                                    var message = 'Product sync completed! ' + data.existing_count + ' products imported.';
-                                    if (data.failed_count && data.failed_count > 0) {
-                                        message += ' ' + data.failed_count + ' products failed to import due to API limitations.';
-                                    }
-                                    message += ' Now syncing variations...';
-                                    updateSyncResult('<div class="notice notice-info inline"><p>' + message + '</p></div>');
-                                    
-                                    // Automatically start variation sync
-                                    startAutomaticVariationSync();
-                                }, 1000); // Show final page message for 1 second
+                                // Sync complete
+                                $('#sync-result').html('<div class="notice notice-success inline"><p>Synchronization completed! ' + data.existing_count + ' products imported.</p></div>');
+                                resetSyncButton($('#synchronize-btn'));
                             }
                         } else {
-                            updateSyncResult('<div class="notice notice-error inline"><p>Error: ' + response.data + '</p></div>');
+                            $('#sync-result').html('<div class="notice notice-error inline"><p>Error: ' + response.data + '</p></div>');
                             resetSyncButton($('#synchronize-btn'));
                         }
                     },
                     error: function() {
                         if (!terminateSync) {
-                            updateSyncResult('<div class="notice notice-error inline"><p>Sync failed on page ' + page + ' - please try again</p></div>');
+                            $('#sync-result').html('<div class="notice notice-error inline"><p>Sync failed on page ' + page + ' - please try again</p></div>');
                             resetSyncButton($('#synchronize-btn'));
                         }
                     }
                 });
             }
-            
-            function startAutomaticVariationSync() {
-                if (terminateSync) {
-                    $('#sync-result').html('<div class="notice notice-warning inline"><p>Synchronization terminated by user</p></div>');
-                    resetSyncButton($('#synchronize-btn'));
-                    return;
-                }
-                
-                // Get status first to check if variation sync is needed
-                $.ajax({
-                    url: ajaxurl,
-                    type: 'POST',
-                    data: {
-                        action: 'wootowoo_get_variation_status',
-                        nonce: '<?php echo wp_create_nonce('wootowoo_get_variation_status'); ?>'
-                    },
-                    success: function(response) {
-                        if (response.success && response.data.has_variable_products && response.data.remaining_variable_products > 0) {
-                            updateSyncResult('<div class="notice notice-info inline"><p>Starting automatic variation sync for ' + response.data.remaining_variable_products + ' variable products...</p></div>');
-                            syncVariationsBatchAutomatic(1, response.data.remaining_variable_products);
-                        } else {
-                            // No variations to sync, show completion message
-                            $('#sync-result').html('<div class="notice notice-success inline"><p>✅ Synchronization completed successfully!</p></div>');
-                            resetSyncButton($('#synchronize-btn'));
-                        }
-                    },
-                    error: function(xhr, status, error) {
-                        updateSyncResult('<div class="notice notice-error inline"><p>Failed to check variation status: ' + error + '</p></div>');
-                        resetSyncButton($('#synchronize-btn'));
-                    }
-                });
-            }
-            
-            function syncVariationsBatchAutomatic(batchNum, totalRemaining) {
-                if (terminateSync) {
-                    $('#sync-result').html('<div class="notice notice-warning inline"><p>Synchronization terminated by user</p></div>');
-                    resetSyncButton($('#synchronize-btn'));
-                    return;
-                }
-                
-                var result = $('#sync-result');
-                result.html('<div class="notice notice-info inline"><p>Processing variation batch ' + batchNum + ' (' + totalRemaining + ' products remaining)...</p></div>');
-                
-                currentSyncRequest = $.ajax({
-                    url: ajaxurl,
-                    type: 'POST',
-                    data: {
-                        action: 'wootowoo_sync_variations_batch',
-                        nonce: '<?php echo wp_create_nonce('wootowoo_sync_variations_batch'); ?>',
-                        batch_size: 5
-                    },
-                    success: function(response) {
-                        if (response.success && response.data) {
-                            var data = response.data;
-                            
-                            if (data.completed) {
-                                result.html('<div class="notice notice-info inline"><p>Variations complete! Now syncing categories...</p></div>');
-                                // Start category sync after variations are complete
-                                startCategorySync();
-                            } else if (data.has_more) {
-                                // Continue with next batch
-                                setTimeout(function() {
-                                    if (!terminateSync) {
-                                        syncVariationsBatchAutomatic(batchNum + 1, totalRemaining - data.processed_count);
-                                    }
-                                }, 1000);
-                            } else {
-                                result.html('<div class="notice notice-warning inline"><p>Variation sync stopped. Processed ' + data.processed_count + ' products.</p></div>');
-                                resetSyncButton($('#synchronize-btn'));
-                            }
-                        } else {
-                            result.html('<div class="notice notice-error inline"><p>Variation sync failed: ' + (response.data ? response.data.message : 'Unknown error') + '</p></div>');
-                            resetSyncButton($('#synchronize-btn'));
-                        }
-                    },
-                    error: function(xhr, status, error) {
-                        if (status !== 'abort') {
-                            result.html('<div class="notice notice-error inline"><p>Variation sync failed: ' + error + '</p></div>');
-                        }
-                        resetSyncButton($('#synchronize-btn'));
-                    }
-                });
-            }
-            
-            function startCategorySync() {
-                if (terminateSync) {
-                    $('#sync-result').html('<div class="notice notice-warning inline"><p>Synchronization terminated by user</p></div>');
-                    resetSyncButton($('#synchronize-btn'));
-                    return;
-                }
-                
-                var result = $('#sync-result');
-                result.html('<div class="notice notice-info inline"><p>Starting category sync...</p></div>');
-                
-                $.ajax({
-                    url: ajaxurl,
-                    type: 'POST',
-                    data: {
-                        action: 'wootowoo_sync_categories',
-                        nonce: '<?php echo wp_create_nonce('wootowoo_sync_categories'); ?>'
-                    },
-                    success: function(response) {
-                        if (response.success) {
-                            result.html('<div class="notice notice-success inline"><p>✅ Synchronization completed! Products, variations, and categories synced successfully.</p></div>');
-                            resetSyncButton($('#synchronize-btn'));
-                            // Refresh page to update status display
-                            setTimeout(function() {
-                                location.reload();
-                            }, 2000);
-                        } else {
-                            result.html('<div class="notice notice-error inline"><p>Category sync failed: ' + response.data + '</p></div>');
-                            resetSyncButton($('#synchronize-btn'));
-                        }
-                    },
-                    error: function(xhr, status, error) {
-                        if (status !== 'abort') {
-                            result.html('<div class="notice notice-error inline"><p>Category sync failed: ' + error + '</p></div>');
-                        }
-                        resetSyncButton($('#synchronize-btn'));
-                    }
-                });
-            }
-            
         });
         </script>
         <?php

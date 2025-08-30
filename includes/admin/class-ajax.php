@@ -28,7 +28,9 @@ class WooToWoo_Ajax {
         add_action('wp_ajax_wootowoo_sync_products', array($this, 'sync_products'));
         add_action('wp_ajax_wootowoo_terminate_sync', array($this, 'terminate_sync'));
         add_action('wp_ajax_wootowoo_restart_sync', array($this, 'restart_sync'));
-        add_action('wp_ajax_wootowoo_sync_variations', array($this, 'sync_variations'));
+        add_action('wp_ajax_wootowoo_get_variation_status', array($this, 'get_variation_status'));
+        add_action('wp_ajax_wootowoo_sync_variations_batch', array($this, 'sync_variations_batch'));
+        add_action('wp_ajax_wootowoo_sync_categories', array($this, 'sync_categories'));
     }
 
     public function test_connection() {
@@ -122,15 +124,45 @@ class WooToWoo_Ajax {
         }
     }
     
-    public function sync_variations() {
-        if (!wp_verify_nonce($_POST['nonce'], 'wootowoo_sync_variations')) {
+    public function get_variation_status() {
+        if (!wp_verify_nonce($_POST['nonce'], 'wootowoo_get_variation_status')) {
             wp_die('Security check failed');
         }
         
-        $result = $this->sync_service->sync_variations();
+        $result = $this->sync_service->get_variation_sync_status();
         
         if ($result['success']) {
-            wp_send_json_success($result['message']);
+            wp_send_json_success($result);
+        } else {
+            wp_send_json_error($result['message']);
+        }
+    }
+    
+    public function sync_variations_batch() {
+        if (!wp_verify_nonce($_POST['nonce'], 'wootowoo_sync_variations_batch')) {
+            wp_die('Security check failed');
+        }
+        
+        $batch_size = isset($_POST['batch_size']) ? intval($_POST['batch_size']) : 5;
+        
+        $result = $this->sync_service->sync_variations_batch($batch_size);
+        
+        if ($result['success']) {
+            wp_send_json_success($result);
+        } else {
+            wp_send_json_error($result['message']);
+        }
+    }
+    
+    public function sync_categories() {
+        if (!wp_verify_nonce($_POST['nonce'], 'wootowoo_sync_categories')) {
+            wp_die('Security check failed');
+        }
+        
+        $result = $this->sync_service->sync_categories_from_products();
+        
+        if ($result['success']) {
+            wp_send_json_success($result);
         } else {
             wp_send_json_error($result['message']);
         }

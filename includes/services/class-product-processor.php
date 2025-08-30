@@ -111,7 +111,40 @@ class WooToWoo_Product_Processor {
         return $categories;
     }
     
-    public function prepare_for_import($product) {
+    public function remap_product_categories($product, $category_mapping = null) {
+        // Remap product category IDs from source to destination
+        if (!isset($product['categories']) || !is_array($product['categories'])) {
+            return $product;
+        }
+        
+        // Get category mapping if not provided
+        if ($category_mapping === null) {
+            $sync_service = WooToWoo_Sync_Service::get_instance();
+            $category_mapping = $sync_service->get_category_mapping_for_products();
+        }
+        
+        // Remap category IDs
+        $remapped_categories = array();
+        foreach ($product['categories'] as $category) {
+            if (isset($category['id']) && isset($category_mapping[$category['id']])) {
+                // Update with destination ID
+                $category['id'] = $category_mapping[$category['id']]->destination_category_id;
+                $remapped_categories[] = $category;
+            } else {
+                // Keep original if no mapping found (will be handled by import process)
+                $remapped_categories[] = $category;
+                error_log("WooToWoo: No destination mapping found for source category ID {$category['id']}");
+            }
+        }
+        
+        $product['categories'] = $remapped_categories;
+        return $product;
+    }
+    
+    public function prepare_for_import($product, $category_mapping = null) {
+        // Remap categories before preparing for import
+        $product = $this->remap_product_categories($product, $category_mapping);
+        
         // Prepare product data for local import (future use)
         // This would transform remote product data to local format
         
@@ -129,6 +162,21 @@ class WooToWoo_Product_Processor {
                 '_wootowoo_source_id' => $product['id']
             )
         );
+        
+        // Add category terms if available
+        if (isset($product['categories']) && is_array($product['categories'])) {
+            $category_ids = array();
+            foreach ($product['categories'] as $category) {
+                if (isset($category['id']) && is_numeric($category['id'])) {
+                    $category_ids[] = intval($category['id']);
+                }
+            }
+            if (!empty($category_ids)) {
+                $import_data['tax_input'] = array(
+                    'product_cat' => $category_ids
+                );
+            }
+        }
         
         return $import_data;
     }
